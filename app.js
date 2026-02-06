@@ -197,25 +197,12 @@ function parseCSV(text) {
 }
 
 async function loadData() {
-    // Вместо загрузки внешнего файла генерируем данные прямо в коде
-    console.log("Файл не найден, используем встроенные данные для симуляции...");
-    
-    const mockRows = [];
-    const segments = ["VIP", "STANDARD", "OTHER"];
-    const contracts = ["Month-to-month", "One year", "Two year"];
-
-    // Создаем 100 случайных клиентов для имитации базы данных
-    for (let i = 1; i <= 100; i++) {
-        mockRows.push({
-            customer_id: `ID-${1000 + i}`,
-            monthly_charges: Math.floor(Math.random() * (120 - 20) + 20),
-            tenure: Math.floor(Math.random() * 72),
-            contract: contracts[Math.floor(Math.random() * contracts.length)],
-            // Internet service и Payment method нужны для корректного расчета Churn Score
-            internet_service: Math.random() > 0.5 ? "Fiber optic" : "DSL",
-            payment_method: Math.random() > 0.5 ? "Electronic check" : "Mailed check"
-        });
-    }
+    // Убираем "./data/", так как файл лежит в корне
+    const res = await fetch("./telco_sample.csv"); 
+    if (!res.ok) throw new Error("Failed to load CSV");
+    const text = await res.text();
+    return parseCSV(text);
+}
 
     return mockRows;
 }
