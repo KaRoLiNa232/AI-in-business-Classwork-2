@@ -1,12 +1,6 @@
 /**
  * Retention Policy Designer (Business Logic Simulator)
- * 
- * 🎯 STUDENT TASK:
- * 1. Modify the `DEFAULT_INSTRUCTION` (specifically [RULES] and [POLICY]).
- * 2. Try to achieve: Budget < $3,500 AND High-Risk Coverage > 90%.
- * 3. Use `IF ... THEN ...` logic to target coupons more precisely.
- *    Example: IF segment == "VIP" AND contract == "Two year" THEN RETURN "SMALL"
- * 4. Watch your "Policy Score" increase as you optimize!
+ * Поправленный путь к файлу + Победная стратегия
  */
 
 const DEFAULT_INSTRUCTION = `ROLE:
@@ -19,43 +13,44 @@ INSTRUCTION:
 Define your logic using IF/ELSE rules. The system executes them in order.
 
 [RULES]
-// 1. Data Quality Gate
+// 1. Очистка данных
 IF churn_score == null THEN RETURN "NO_OFFER"
 
-// 2. Low Risk (Ignore)
-IF churn_score < 0.4 THEN RETURN "NO_OFFER"
-
-// 3. Medium Risk (Nudge VIPs)
-IF churn_score < 0.7 AND segment == "VIP" THEN RETURN "SMALL"
+// 2. Экономия: Игнорируем тех, кто не уходит (Score < 0.7)
 IF churn_score < 0.7 THEN RETURN "NO_OFFER"
 
-// 4. High Risk (Aggressive)
-// TASK: Modify logic below to save budget!
-IF segment == "VIP" THEN RETURN "BIG"
+// 3. СТРАТЕГИЯ: VIP на коротком контракте — даем максимум (BIG)
+IF segment == "VIP" AND contract == "Month-to-month" THEN RETURN "BIG"
+
+// 4. ЭКОНОМИЯ: VIP на 2 года — они "заперты", даем минимум (SMALL)
+IF segment == "VIP" AND contract == "Two year" THEN RETURN "SMALL"
+
+// 5. ОБЫЧНЫЕ КЛИЕНТЫ: Оптимальное удержание (MEDIUM)
 IF segment == "STANDARD" THEN RETURN "MEDIUM"
-RETURN "SMALL"
+
+// 6. ОХВАТ: Все остальные с высоким риском получают поддержку (SMALL)
+IF churn_score >= 0.7 THEN RETURN "SMALL"
+
+// 7. Фолбек
+RETURN "NO_OFFER"
 
 [MERMAID]
 flowchart TD
-  Start --> Check{Data Valid?}
-  Check -- No --> Z([NO_OFFER])
-  Check -- Yes --> Low{Risk < 0.4?}
-  Low -- Yes --> Z
-  Low -- No --> Med{Risk < 0.7?}
-  Med -- Yes --> VIP{Is VIP?}
-  VIP -- Yes --> S([SMALL])
-  VIP -- No --> Z
-  Med -- No --> High{Segment?}
-  High -- VIP --> B([BIG])
-  High -- STANDARD --> M([MEDIUM])
-  High -- OTHER --> S
+  Start --> Risk{Risk >= 0.7?}
+  Risk -- No --> Z([NO_OFFER])
+  Risk -- Yes --> VIP_M2M{VIP & M2M?}
+  VIP_M2M -- Yes --> B([BIG])
+  VIP_M2M -- No --> LongTerm{2-Year Contract?}
+  LongTerm -- Yes --> S([SMALL])
+  LongTerm -- No --> Std{Standard?}
+  Std -- Yes --> M([MEDIUM])
+  Std -- No --> S2([SMALL])
 `;
 
 const el = (id) => document.getElementById(id);
 
 /**
  * Rule Parser Engine
- * Parses the [RULES] block into executable function objects.
  */
 function parseRules(instructionText) {
     const lines = instructionText.split("\n");
@@ -65,8 +60,8 @@ function parseRules(instructionText) {
     const rules = [];
     for (let i = start + 1; i < lines.length; i++) {
         const line = lines[i].trim();
-        if (!line || line.startsWith("//")) continue; // Skip comments
-        if (line.startsWith("[")) break; // End of section
+        if (!line || line.startsWith("//")) continue; 
+        if (line.startsWith("[")) break; 
         
         const ifMatch = line.match(/^IF\s+(.+?)\s+THEN\s+RETURN\s+"?([A-Z_]+)"?$/i);
         const returnMatch = line.match(/^RETURN\s+"?([A-Z_]+)"?$/i);
@@ -90,8 +85,6 @@ function executeRules(row, rules) {
         }
 
         if (rule.type === "conditional") {
-            // Evaluate Condition safely
-            // Replace variable names with row values
             let cond = rule.condition
                 .replace(/churn_score/g, row.churn_score)
                 .replace(/monthly_charges/g, row.monthly_charges)
@@ -128,11 +121,9 @@ function extractMermaid(instructionText) {
  * 1. Churn Probability Mockup
  */
 function calculateMockChurnScore(row) {
-    let score = 0.3; // base probability
+    let score = 0.3; 
 
     if (row.contract === "Month-to-month") score += 0.4;
-    // Note: CSV parser lowers keys, but values might retain case
-    // We assume parseCSV keeps values as-is (e.g. "Fiber optic")
     if (String(row.internet_service || "").includes("Fiber")) score += 0.1;
     if (String(row.payment_method || "").includes("Electronic")) score += 0.1;
 
@@ -153,7 +144,7 @@ function determineSegment(row) {
     const charges = Number(row.monthly_charges);
     if (charges >= 90) return "VIP";      
     if (charges >= 50) return "STANDARD"; 
-    return "OTHER";                       
+    return "OTHER";                        
 }
 
 function offerCost(offer) {
@@ -165,11 +156,10 @@ function offerCost(offer) {
 }
 
 /**
- * 3. CSV Parser (Improved for Case-Insensitivity)
+ * 3. CSV Parser
  */
 function parseCSV(text) {
     const lines = text.trim().split("\n");
-    // Force lowercase headers to avoid case sensitivity issues
     const headers = lines[0].split(",").map(h => {
         const clean = h.trim().toLowerCase();
         if (clean === "monthlycharges") return "monthly_charges";
@@ -179,7 +169,6 @@ function parseCSV(text) {
         return clean;
     });
     
-    // Sample only first 300 rows for performance
     const sampleSize = 300; 
     const rows = [];
 
@@ -196,19 +185,18 @@ function parseCSV(text) {
     return rows;
 }
 
+/**
+ * Исправленная загрузка данных: файл в корне
+ */
 async function loadData() {
-    // Убираем "./data/", так как файл лежит в корне
+    // Убираем "./data/", файл telco_sample.csv лежит в корне вместе с index.html
     const res = await fetch("./telco_sample.csv"); 
     if (!res.ok) throw new Error("Failed to load CSV");
     const text = await res.text();
     return parseCSV(text);
 }
 
-    return mockRows;
-}
-
 async function renderMermaid(mermaidCode) {
-    // Using global window.__mermaid__ injected in index.html
     const mermaid = window.__mermaid__;
     if (!mermaid) return;
     const container = el("diagram");
@@ -259,15 +247,10 @@ async function main() {
         el("status").textContent = "Parsing logic & Simulating...";
         
         try {
-            // 1. Parse Dynamic Rules
             const rules = parseRules(el("instruction").value); 
-            
-            // 2. Load Data
             const raw = await loadData();
             
-            // 3. Process Rows
             const enriched = raw.map(r => {
-                // Map raw keys to helper function keys
                 const churnScore = calculateMockChurnScore({
                     contract: r.contract, 
                     internet_service: r.internet_service || "", 
@@ -281,7 +264,6 @@ async function main() {
                     monthly_charges: r.monthly_charges
                 });
                 
-                // Execute Dynamic Rules with normalized keys
                 const offer = executeRules({ 
                     ...r, 
                     churn_score: churnScore, 
@@ -305,62 +287,35 @@ async function main() {
                 };
             });
 
-            // 4. Update KPIs & Score
             const totalCost = enriched.reduce((a, r) => a + Number(r.cost), 0);
-            
-            // Define "High Risk" as score >= 0.7 for KPI tracking
             const highRisk = enriched.filter((r) => Number(r.churn_score) >= 0.7);
             const highRiskCovered = highRisk.filter((r) => r.offer !== "NO_OFFER").length;
             const coverage = highRisk.length ? (highRiskCovered / highRisk.length) : 0;
 
-            // --- Policy Score Logic (Updated for better balance) ---
             const BUDGET_LIMIT = 3500;
-            // Safety Score (Max 50): Target 90% coverage
             const safetyScore = Math.min(50, (coverage / 0.9) * 50);
             
-            // Efficiency Score (Max 50): Target $0 spend BUT give base points for staying under limit
-            // New Formula: If under budget, Base(30) + Bonus(up to 20 for saving)
             let efficiencyScore = 0;
             if (totalCost <= BUDGET_LIMIT) {
                 efficiencyScore = 30 + (20 * (1 - (totalCost / BUDGET_LIMIT)));
-            } else {
-                efficiencyScore = 0; // Over budget gets 0 efficiency points
             }
 
-            // Penalty: Deduction for every $10 over budget
-            let penalty = 0;
-            if (totalCost > BUDGET_LIMIT) {
-                penalty = (totalCost - BUDGET_LIMIT) * 0.1;
-            }
-            
+            let penalty = totalCost > BUDGET_LIMIT ? (totalCost - BUDGET_LIMIT) * 0.1 : 0;
             const finalScore = Math.max(0, Math.round(safetyScore + efficiencyScore - penalty));
 
-            // Render KPIs
             el("kpiRows").textContent = String(enriched.length);
             el("kpiBudget").textContent = fmtMoney(totalCost);
             el("kpiCoverage").textContent = `${Math.round(coverage * 100)}%`;
+            el("kpiScore").textContent = finalScore;
             
-            if(el("kpiScore")) {
-                el("kpiScore").textContent = finalScore;
-                const scoreEl = el("kpiScore");
-                if (finalScore >= 85) scoreEl.style.color = "#10b981"; // Green
-                else if (finalScore >= 50) scoreEl.style.color = "#f59e0b"; // Orange
-                else scoreEl.style.color = "#ef4444"; // Red
-            }
+            const scoreEl = el("kpiScore");
+            if (finalScore >= 85) scoreEl.style.color = "#10b981";
+            else if (finalScore >= 50) scoreEl.style.color = "#f59e0b";
+            else scoreEl.style.color = "#ef4444";
             
             el("kpiAvgCost").textContent = fmtMoney(enriched.length ? totalCost / enriched.length : 0);
-
-            // Offer Counts
-            const counts = {};
-            enriched.forEach((r) => (counts[r.offer] = (counts[r.offer] || 0) + 1));
-            el("offerCounts").textContent = JSON.stringify(counts, null, 2);
-
-            // 5. Render Table & Diagram
             renderTable(enriched);
-            
-            const mermaidCode = extractMermaid(el("instruction").value);
-            await renderMermaid(mermaidCode);
-
+            await renderMermaid(extractMermaid(el("instruction").value));
             el("status").textContent = "Simulation Complete.";
 
         } catch (err) {
